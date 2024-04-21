@@ -2,6 +2,9 @@ defmodule Phoenix.Transports.LongPoll do
   @moduledoc false
   @behaviour Plug
 
+  # 10MB
+  @max_base64_size 10_000_000
+
   import Plug.Conn
   alias Phoenix.Socket.{V1, V2, Transport}
 
@@ -46,9 +49,10 @@ defmodule Phoenix.Transports.LongPoll do
 
   # Starts a new session or listen to a message if one already exists.
   defp dispatch(%{method: "GET"} = conn, endpoint, handler, opts) do
-    case resume_session(conn.params, endpoint, opts) do
-      {:ok, server_ref} ->
-        listen(conn, server_ref, endpoint, opts)
+    case resume_session(conn, conn.params, endpoint, opts) do
+      {:ok, new_conn, server_ref} ->
+        listen(new_conn, server_ref, endpoint, opts)
+
       :error ->
         new_session(conn, endpoint, handler, opts)
     end
@@ -56,9 +60,10 @@ defmodule Phoenix.Transports.LongPoll do
 
   # Publish the message.
   defp dispatch(%{method: "POST"} = conn, endpoint, _, opts) do
-    case resume_session(conn.params, endpoint, opts) do
-      {:ok, server_ref} ->
-        publish(conn, server_ref, endpoint, opts)
+    case resume_session(conn, conn.params, endpoint, opts) do
+      {:ok, new_conn, server_ref} ->
+        publish(new_conn, server_ref, endpoint, opts)
+
       :error ->
         conn |> put_status(:gone) |> status_json()
     end
@@ -72,11 +77,41 @@ defmodule Phoenix.Transports.LongPoll do
   defp publish(conn, server_ref, endpoint, opts) do
     case read_body(conn, []) do
       {:ok, body, conn} ->
-        status = transport_dispatch(endpoint, server_ref, body, opts)
+        # we need to match on both v1 and v2 protocol, as well as wrap for backwards compat
+        batch =
+          case get_req_header(conn, "content-type") do
+            ["application/x-ndjson"] ->
+              body
+              |> String.split(["\n", "\r\n"])
+              |> Enum.map(fn
+                "[" <> _ = txt -> {txt, :text}
+                base64 -> {safe_decode64!(base64), :binary}
+              end)
+
+            _ ->
+              [{body, :text}]
+          end
+
+        {conn, status} =
+          Enum.reduce_while(batch, {conn, nil}, fn msg, {conn, _status} ->
+            case transport_dispatch(endpoint, server_ref, msg, opts) do
+              :ok -> {:cont, {conn, :ok}}
+              :request_timeout = timeout -> {:halt, {conn, timeout}}
+            end
+          end)
+
         conn |> put_status(status) |> status_json()
 
       _ ->
         raise Plug.BadRequestError
+    end
+  end
+
+  defp safe_decode64!(base64) do
+    if byte_size(base64) <= @max_base64_size do
+      Base.decode64!(base64)
+    else
+      raise Plug.BadRequestError
     end
   end
 
@@ -96,9 +131,9 @@ defmodule Phoenix.Transports.LongPoll do
 
   defp new_session(conn, endpoint, handler, opts) do
     priv_topic =
-      "phx:lp:"
-      <> Base.encode64(:crypto.strong_rand_bytes(16))
-      <> (System.system_time(:millisecond) |> Integer.to_string)
+      "phx:lp:" <>
+        Base.encode64(:crypto.strong_rand_bytes(16)) <>
+        (System.system_time(:millisecond) |> Integer.to_string())
 
     keys = Keyword.get(opts, :connect_info, [])
     connect_info = Transport.connect_info(conn, endpoint, keys)
@@ -110,7 +145,7 @@ defmodule Phoenix.Transports.LongPoll do
         conn |> put_status(:forbidden) |> status_json()
 
       {:ok, server_pid} ->
-        data  = {:v1, endpoint.config(:endpoint_id), server_pid, priv_topic}
+        data = {:v1, endpoint.config(:endpoint_id), server_pid, priv_topic}
         token = sign_token(endpoint, data, opts)
         conn |> put_status(:gone) |> status_token_messages_json(token, [])
     end
@@ -118,7 +153,8 @@ defmodule Phoenix.Transports.LongPoll do
 
   defp listen(conn, server_ref, endpoint, opts) do
     ref = make_ref()
-    broadcast_from!(endpoint, server_ref, {:flush, client_ref(server_ref), ref})
+    client_ref = client_ref(server_ref)
+    broadcast_from!(endpoint, server_ref, {:flush, client_ref, ref})
 
     {status, messages} =
       receive do
@@ -126,14 +162,18 @@ defmodule Phoenix.Transports.LongPoll do
           {:ok, messages}
 
         {:now_available, ^ref} ->
-          broadcast_from!(endpoint, server_ref, {:flush, client_ref(server_ref), ref})
+          broadcast_from!(endpoint, server_ref, {:flush, client_ref, ref})
+
           receive do
             {:messages, messages, ^ref} -> {:ok, messages}
           after
-            opts[:window_ms]  -> {:no_content, []}
+            opts[:window_ms] ->
+              broadcast_from!(endpoint, server_ref, {:expired, client_ref, ref})
+              {:no_content, []}
           end
       after
         opts[:window_ms] ->
+          broadcast_from!(endpoint, server_ref, {:expired, client_ref, ref})
           {:no_content, []}
       end
 
@@ -144,19 +184,25 @@ defmodule Phoenix.Transports.LongPoll do
 
   # Retrieves the serialized `Phoenix.LongPoll.Server` pid
   # by publishing a message in the encrypted private topic.
-  defp resume_session(%{"token" => token}, endpoint, opts) do
+  defp resume_session(%Plug.Conn{} = conn, %{"token" => token}, endpoint, opts) do
     case verify_token(endpoint, token, opts) do
       {:ok, {:v1, id, pid, priv_topic}} ->
         server_ref = server_ref(endpoint.config(:endpoint_id), id, pid, priv_topic)
+
+        new_conn =
+          Plug.Conn.register_before_send(conn, fn conn ->
+            unsubscribe(endpoint, server_ref)
+            conn
+          end)
 
         ref = make_ref()
         :ok = subscribe(endpoint, server_ref)
         broadcast_from!(endpoint, server_ref, {:subscribe, client_ref(server_ref), ref})
 
         receive do
-          {:subscribe, ^ref} -> {:ok, server_ref}
+          {:subscribe, ^ref} -> {:ok, new_conn, server_ref}
         after
-          opts[:pubsub_timeout_ms]  -> :error
+          opts[:pubsub_timeout_ms] -> :error
         end
 
       _ ->
@@ -164,12 +210,16 @@ defmodule Phoenix.Transports.LongPoll do
     end
   end
 
-  defp resume_session(_params, _endpoint, _opts), do: :error
+  defp resume_session(%Plug.Conn{}, _params, _endpoint, _opts), do: :error
 
   ## Helpers
 
-  defp server_ref(endpoint_id, id, pid, topic) do
-    if endpoint_id == id and Process.alive?(pid), do: pid, else: topic
+  defp server_ref(endpoint_id, id, pid, topic) when is_pid(pid) do
+    cond do
+      node(pid) in Node.list() -> pid
+      endpoint_id == id and Process.alive?(pid) -> pid
+      true -> topic
+    end
   end
 
   defp client_ref(topic) when is_binary(topic), do: topic
@@ -177,20 +227,38 @@ defmodule Phoenix.Transports.LongPoll do
 
   defp subscribe(endpoint, topic) when is_binary(topic),
     do: Phoenix.PubSub.subscribe(endpoint.config(:pubsub_server), topic, link: true)
+
   defp subscribe(_endpoint, pid) when is_pid(pid),
+    do: :ok
+
+  defp unsubscribe(endpoint, topic) when is_binary(topic),
+    do: Phoenix.PubSub.unsubscribe(endpoint.config(:pubsub_server), topic)
+
+  defp unsubscribe(_endpoint, pid) when is_pid(pid),
     do: :ok
 
   defp broadcast_from!(endpoint, topic, msg) when is_binary(topic),
     do: Phoenix.PubSub.broadcast_from!(endpoint.config(:pubsub_server), self(), topic, msg)
+
   defp broadcast_from!(_endpoint, pid, msg) when is_pid(pid),
     do: send(pid, msg)
 
   defp sign_token(endpoint, data, opts) do
-    Phoenix.Token.sign(endpoint, Atom.to_string(endpoint.config(:pubsub_server)), data, opts[:crypto])
+    Phoenix.Token.sign(
+      endpoint,
+      Atom.to_string(endpoint.config(:pubsub_server)),
+      data,
+      opts[:crypto]
+    )
   end
 
   defp verify_token(endpoint, signed, opts) do
-    Phoenix.Token.verify(endpoint, Atom.to_string(endpoint.config(:pubsub_server)), signed, opts[:crypto])
+    Phoenix.Token.verify(
+      endpoint,
+      Atom.to_string(endpoint.config(:pubsub_server)),
+      signed,
+      opts[:crypto]
+    )
   end
 
   defp status_json(conn) do

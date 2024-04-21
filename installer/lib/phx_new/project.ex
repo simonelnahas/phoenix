@@ -16,7 +16,7 @@ defmodule Phx.New.Project do
             opts: :unset,
             in_umbrella?: false,
             binding: [],
-            generators: []
+            generators: [timestamp_type: :utc_datetime]
 
   def new(project_path, opts) do
     project_path = Path.expand(project_path)
@@ -53,8 +53,12 @@ defmodule Phx.New.Project do
     Keyword.fetch!(binding, :dashboard)
   end
 
-  def assets?(%Project{binding: binding}) do
-    Keyword.fetch!(binding, :assets)
+  def javascript?(%Project{binding: binding}) do
+    Keyword.fetch!(binding, :javascript)
+  end
+
+  def css?(%Project{binding: binding}) do
+    Keyword.fetch!(binding, :css)
   end
 
   def mailer?(%Project{binding: binding}) do

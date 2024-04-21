@@ -54,7 +54,9 @@ defmodule Mix.Tasks.Phx.NewTest do
 
       assert_file("phx_blog/config/config.exs", fn file ->
         assert file =~ "ecto_repos: [PhxBlog.Repo]"
+        assert file =~ "generators: [timestamp_type: :utc_datetime]"
         assert file =~ "config :phoenix, :json_library, Jason"
+        assert file =~ ~s[cd: Path.expand("../assets", __DIR__),]
         refute file =~ "namespace: PhxBlog"
         refute file =~ "config :phx_blog, :generators"
       end)
@@ -108,6 +110,8 @@ defmodule Mix.Tasks.Phx.NewTest do
 
       assert_file("phx_blog/lib/phx_blog_web/components/core_components.ex", fn file ->
         assert file =~ "defmodule PhxBlogWeb.CoreComponents"
+        assert file =~ ~S|aria-label={gettext("close")}|
+        assert file =~ ~S|<.flash kind={:info} title={gettext("Success!")} flash={@flash} />|
       end)
 
       assert_file("phx_blog/lib/phx_blog_web/components/layouts.ex", fn file ->
@@ -131,16 +135,11 @@ defmodule Mix.Tasks.Phx.NewTest do
       end)
 
       assert_file("phx_blog/lib/phx_blog_web/components/layouts/app.html.heex")
-
-      assert_file("phx_blog/lib/phx_blog_web/controllers/page_html/home.html.heex", fn file ->
-        version = Application.spec(:phx_new, :vsn) |> to_string() |> Version.parse!()
-        changelog_vsn = "v#{version.major}.#{version.minor}"
-
-        assert file =~
-                 "https://github.com/phoenixframework/phoenix/blob/#{changelog_vsn}/CHANGELOG.md"
-      end)
+      assert_file("phx_blog/lib/phx_blog_web/controllers/page_html/home.html.heex")
 
       # assets
+      assert_file("phx_blog/priv/static/images/logo.svg")
+
       assert_file("phx_blog/.gitignore", fn file ->
         assert file =~ "/priv/static/assets/"
         assert file =~ "phx_blog-*.tar"
@@ -152,7 +151,13 @@ defmodule Mix.Tasks.Phx.NewTest do
         assert file =~ "lib/phx_blog_web/(controllers|live|components)/.*(ex|heex)"
       end)
 
+      # tailwind
       assert_file("phx_blog/assets/css/app.css")
+
+      assert_file("phx_blog/assets/tailwind.config.js", fn file ->
+        assert file =~ "phx_blog_web.ex"
+        assert file =~ "phx_blog_web/**/*.*ex"
+      end)
 
       refute File.exists?("phx_blog/priv/static/assets/app.css")
       refute File.exists?("phx_blog/priv/static/assets/app.js")
@@ -178,7 +183,10 @@ defmodule Mix.Tasks.Phx.NewTest do
 
       assert_file("phx_blog/config/runtime.exs", fn file ->
         assert file =~ config
-        assert file =~ ~S|maybe_ipv6 = if System.get_env("ECTO_IPV6"), do: [:inet6], else: []|
+
+        assert file =~
+                 ~S|maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []|
+
         assert file =~ ~S|socket_options: maybe_ipv6|
 
         assert file =~ """
@@ -249,7 +257,7 @@ defmodule Mix.Tasks.Phx.NewTest do
 
       # Mailer
       assert_file("phx_blog/mix.exs", fn file ->
-        assert file =~ "{:swoosh, \"~> 1.3\"}"
+        assert file =~ "{:swoosh, \"~> 1.5\"}"
         assert file =~ "{:finch, \"~> 0.13\"}"
       end)
 
@@ -276,7 +284,8 @@ defmodule Mix.Tasks.Phx.NewTest do
       end)
 
       assert_file("phx_blog/config/prod.exs", fn file ->
-        assert file =~ "config :swoosh, :api_client, PhxBlog.Finch"
+        assert file =~
+                 "config :swoosh, api_client: Swoosh.ApiClient.Finch, finch_name: PhxBlog.Finch"
       end)
 
       # Install dependencies?
@@ -315,11 +324,12 @@ defmodule Mix.Tasks.Phx.NewTest do
         assert file =~ ~r/\n$/
       end)
 
+      refute File.exists?("phx_blog/priv/static/images/logo.svg")
+
       assert_file("phx_blog/config/dev.exs", ~r/watchers: \[\]/)
 
       # No assets & No HTML
       refute_file("phx_blog/priv/static/assets/app.css")
-      refute_file("phx_blog/priv/static/favicon.ico")
       refute_file("phx_blog/priv/static/assets/app.js")
 
       # No Ecto
@@ -407,7 +417,7 @@ defmodule Mix.Tasks.Phx.NewTest do
 
       # No mailer or emails
       assert_file("phx_blog/mix.exs", fn file ->
-        refute file =~ "{:swoosh, \"~> 1.3\"}"
+        refute file =~ "{:swoosh, \"~> 1.5\"}"
         refute file =~ "{:finch, \"~> 0.13\"}"
       end)
 
@@ -542,10 +552,21 @@ defmodule Mix.Tasks.Phx.NewTest do
     end)
   end
 
+  test "new with --no-gettext" do
+    in_tmp("new with no_gettext", fn ->
+      Mix.Tasks.Phx.New.run([@app_name, "--no-gettext"])
+
+      assert_file("phx_blog/lib/phx_blog_web/components/core_components.ex", fn file ->
+        assert file =~ ~S|aria-label="close"|
+        assert file =~ ~S|<.flash kind={:info} title="Success!" flash={@flash} />|
+      end)
+    end)
+  end
+
   test "new with binary_id" do
     in_tmp("new with binary_id", fn ->
       Mix.Tasks.Phx.New.run([@app_name, "--binary-id"])
-      assert_file("phx_blog/config/config.exs", ~r/generators: \[binary_id: true\]/)
+      assert_file("phx_blog/config/config.exs", ~r/generators: \[.*binary_id: true\.*]/)
     end)
   end
 
@@ -591,7 +612,16 @@ defmodule Mix.Tasks.Phx.NewTest do
           assert file =~ "deps_path: \"../../deps\""
           assert file =~ "lockfile: \"../../mix.lock\""
         end)
+
+        refute_file("phx_blog/config/config.exs")
       end)
+
+      assert_file("config/config.exs", fn file ->
+        assert file =~ "PhxBlogWeb.Endpoint"
+        assert file =~ ~s[cd: Path.expand("../apps/phx_blog/assets", __DIR__),]
+      end)
+
+      assert_file("config/config.exs", "PhxBlogWeb.Endpoint")
     end)
   end
 
@@ -674,6 +704,15 @@ defmodule Mix.Tasks.Phx.NewTest do
       assert_file("custom_path/config/runtime.exs", [~r/database: database_path/])
       assert_file("custom_path/lib/custom_path/repo.ex", "Ecto.Adapters.SQLite3")
 
+      assert_file("custom_path/lib/custom_path/application.ex", fn file ->
+        assert file =~ "{Ecto.Migrator"
+        assert file =~ "repos: Application.fetch_env!(:custom_path, :ecto_repos)"
+        assert file =~ "skip: skip_migrations?()"
+
+        assert file =~ "defp skip_migrations?() do"
+        assert file =~ ~s/System.get_env("RELEASE_NAME") != nil/
+      end)
+
       assert_file("custom_path/test/support/conn_case.ex", "DataCase.setup_sandbox(tags)")
 
       assert_file(
@@ -725,6 +764,16 @@ defmodule Mix.Tasks.Phx.NewTest do
     end)
   end
 
+  test "new with bandit web adapter" do
+    in_tmp("new with bandit web adapter", fn ->
+      project_path = Path.join(File.cwd!(), "custom_path")
+      Mix.Tasks.Phx.New.run([project_path, "--adapter", "bandit"])
+      assert_file("custom_path/mix.exs", ":bandit")
+
+      assert_file("custom_path/config/config.exs", "adapter: Bandit.PhoenixAdapter")
+    end)
+  end
+
   test "new with invalid args" do
     assert_raise Mix.Error, ~r"Application name must start with a letter and ", fn ->
       Mix.Tasks.Phx.New.run(["007invalid"])
@@ -752,7 +801,7 @@ defmodule Mix.Tasks.Phx.NewTest do
   end
 
   test "invalid options" do
-    assert_raise Mix.Error, ~r/Invalid option: -d/, fn ->
+    assert_raise OptionParser.ParseError, fn ->
       Mix.Tasks.Phx.New.run(["valid", "-database", "mysql"])
     end
   end

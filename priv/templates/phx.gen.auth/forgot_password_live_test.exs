@@ -1,19 +1,19 @@
 defmodule <%= inspect context.web_module %>.<%= inspect Module.concat(schema.web_namespace, schema.alias) %>ForgotPasswordLiveTest do
-  use <%= inspect context.web_module %>.ConnCase
+  use <%= inspect context.web_module %>.ConnCase<%= test_case_options %>
 
   import Phoenix.LiveViewTest
   import <%= inspect context.module %>Fixtures
 
   alias <%= inspect context.module %>
-  alias <%= inspect schema.repo %>
+  alias <%= inspect schema.repo %><%= schema.repo_alias %>
 
   describe "Forgot password page" do
     test "renders email page", %{conn: conn} do
-      {:ok, _lv, html} = live(conn, ~p"<%= schema.route_prefix %>/reset_password")
+      {:ok, lv, html} = live(conn, ~p"<%= schema.route_prefix %>/reset_password")
 
       assert html =~ "Forgot your password?"
-      assert html =~ "Register</a>"
-      assert html =~ "Log in</a>"
+      assert has_element?(lv, ~s|a[href="#{~p"<%= schema.route_prefix %>/register"}"]|, "Register")
+      assert has_element?(lv, ~s|a[href="#{~p"<%= schema.route_prefix %>/log_in"}"]|, "Log in")
     end
 
     test "redirects if already logged in", %{conn: conn} do

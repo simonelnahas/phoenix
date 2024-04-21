@@ -1,5 +1,5 @@
 defmodule <%= inspect context.web_module %>.<%= inspect Module.concat(schema.web_namespace, schema.alias) %>LoginLiveTest do
-  use <%= inspect context.web_module %>.ConnCase
+  use <%= inspect context.web_module %>.ConnCase<%= test_case_options %>
 
   import Phoenix.LiveViewTest
   import <%= inspect context.module %>Fixtures
@@ -63,7 +63,7 @@ defmodule <%= inspect context.web_module %>.<%= inspect Module.concat(schema.web
 
       {:ok, _login_live, login_html} =
         lv
-        |> element(~s|a:fl-contains("Sign up")|)
+        |> element(~s|main a:fl-contains("Sign up")|)
         |> render_click()
         |> follow_redirect(conn, ~p"<%= schema.route_prefix %>/register")
 
@@ -77,7 +77,7 @@ defmodule <%= inspect context.web_module %>.<%= inspect Module.concat(schema.web
 
       {:ok, conn} =
         lv
-        |> element(~s{a:fl-contains('Forgot your password?')})
+        |> element(~s|main a:fl-contains("Forgot your password?")|)
         |> render_click()
         |> follow_redirect(conn, ~p"<%= schema.route_prefix %>/reset_password")
 

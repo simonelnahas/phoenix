@@ -3,6 +3,7 @@
 /doc/
 /node_modules/
 /tmp/
+/cover/
 
 /assets/node_modules/
 
@@ -17,3 +18,5 @@
 
 erl_crash.dump
 phoenix-*.ez
+
+.DS_Store

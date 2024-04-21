@@ -12,7 +12,7 @@ Finally, all other assets, that usually don't have to be preprocessed, go direct
 
 ## Third-party JS packages
 
-If you want to import JavaScript dependencies, you have two options to add them to your application:
+If you want to import JavaScript dependencies, you have at least three options to add them to your application:
 
 1. Vendor those dependencies inside your project and import them in your "assets/js/app.js" using a relative path:
 
@@ -26,19 +26,25 @@ If you want to import JavaScript dependencies, you have two options to add them 
    import topbar from "topbar"
    ```
 
-## CSS
+3. Use Mix to track the dependency from a source repository:
 
-By default, Phoenix generates CSS with the `tailwind` library, but esbuild has basic support for CSS which you can use if you aren't using tailwind. If you import a `.css` file at the top of your main `.js` file, `esbuild` will bundle it, and write it to the same directory as your final `app.js`.
+   ```elixir
+   # mix.exs
+   {:topbar, github: "buunguyen/topbar", app: false, compile: false}
+   ```
 
-```js
-import "../css/app.css"
-```
+   Run `mix deps.get` to fetch the dependency and then import it:
 
-However, if you want to use a CSS framework, you will need to use a separate tool. Here are some options to do so:
+   ```js
+   import topbar from "topbar"
+   ```
 
-  * You can use `esbuild` plugins (requires `npm`). See the "Esbuild plugins" section below
-
-Don't forget to remove the `import "../css/app.css"` from your JavaScript file when doing so.
+   New applications use this third approach to import Heroicons, avoiding
+   vendoring a copy of all icons when you may only use a few or even none,
+   avoiding Node.js and `npm`, and tracking an explicit version that is easy to
+   update thanks to Mix. It is important to note that git dependencies cannot
+   be used by Hex packages, so if you intend to publish your project to Hex,
+   consider vendoring the files instead.
 
 ## Images, fonts, and external files
 
@@ -89,55 +95,55 @@ $ yarn add ../deps/phoenix ../deps/phoenix_html ../deps/phoenix_live_view
 Next, add a custom JavaScript build script. We'll call the example `assets/build.js`:
 
 ```js
-const esbuild = require('esbuild')
+const esbuild = require("esbuild");
 
-const args = process.argv.slice(2)
-const watch = args.includes('--watch')
-const deploy = args.includes('--deploy')
+const args = process.argv.slice(2);
+const watch = args.includes('--watch');
+const deploy = args.includes('--deploy');
 
 const loader = {
   // Add loaders for images/fonts/etc, e.g. { '.svg': 'file' }
-}
+};
 
 const plugins = [
   // Add and configure plugins here
-]
+];
 
+// Define esbuild options
 let opts = {
-  entryPoints: ['js/app.js'],
+  entryPoints: ["js/app.js"],
   bundle: true,
-  target: 'es2017',
-  outdir: '../priv/static/assets',
-  logLevel: 'info',
-  loader,
-  plugins
-}
-
-if (watch) {
-  opts = {
-    ...opts,
-    watch,
-    sourcemap: 'inline'
-  }
-}
+  logLevel: "info",
+  target: "es2017",
+  outdir: "../priv/static/assets",
+  external: ["*.css", "fonts/*", "images/*"],
+  nodePaths: ["../deps"],
+  loader: loader,
+  plugins: plugins,
+};
 
 if (deploy) {
   opts = {
     ...opts,
-    minify: true
-  }
+    minify: true,
+  };
 }
 
-const promise = esbuild.build(opts)
-
 if (watch) {
-  promise.then(_result => {
-    process.stdin.on('close', () => {
-      process.exit(0)
+  opts = {
+    ...opts,
+    sourcemap: "inline",
+  };
+  esbuild
+    .context(opts)
+    .then((ctx) => {
+      ctx.watch();
     })
-
-    process.stdin.resume()
-  })
+    .catch((_error) => {
+      process.exit(1);
+    });
+} else {
+  esbuild.build(opts);
 }
 ```
 
@@ -172,9 +178,11 @@ Modify the `aliases` task in `mix.exs` to install `npm` packages during `mix set
 
 Finally, remove the `esbuild` configuration from `config/config.exs` and remove the dependency from the `deps` function in your `mix.exs`, and you are done!
 
-## Removing esbuild
+## Alternative JS build tools
 
-If you are writing an API, or for some other reason you do not need to serve any assets, you can disable asset management completely.
+If you are writing an API or you want to use another asset build tool, you may want to remove the `esbuild` Hex package (see steps below). Then you must follow the additional steps required by the third-party tool.
+
+### Remove esbuild
 
 1. Remove the `esbuild` configuration in `config/config.exs` and `config/dev.exs`,
 2. Remove the `assets.deploy` task defined in `mix.exs`,
@@ -184,3 +192,22 @@ If you are writing an API, or for some other reason you do not need to serve any
 ```console
 $ mix deps.unlock esbuild
 ```
+
+## Alternative CSS frameworks
+
+By default, Phoenix generates CSS with the `tailwind` library and its default plugins.
+
+If you want to use external `tailwind` plugins or another CSS framework, you should replace the `tailwind` Hex package (see steps below). Then you can use an `esbuild` plugin (as outlined above) or even bring a separate framework altogether.
+
+### Remove tailwind
+
+1. Remove the `tailwind` configuration in `config/config.exs` and `config/dev.exs`,
+2. Remove the `assets.deploy` task defined in `mix.exs`,
+3. Remove the `tailwind` dependency from `mix.exs`,
+4. Unlock the `tailwind` dependency:
+
+```console
+$ mix deps.unlock tailwind
+```
+
+You may optionally remove and delete the `heroicons` dependency as well.

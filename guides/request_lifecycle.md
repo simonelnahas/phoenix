@@ -32,7 +32,7 @@ The route for our "Welcome to Phoenix!" page from the previous [Up And Running G
 get "/", PageController, :home
 ```
 
-Let's digest what this route is telling us. Visiting [http://localhost:4000/](http://localhost:4000/) issues an HTTP `GET` request to the root path. All requests like this will be handled by the `index/2` function in the `HelloWeb.PageController` module defined in `lib/hello_web/controllers/page_controller.ex`.
+Let's digest what this route is telling us. Visiting [http://localhost:4000/](http://localhost:4000/) issues an HTTP `GET` request to the root path. All requests like this will be handled by the `home/2` function in the `HelloWeb.PageController` module defined in `lib/hello_web/controllers/page_controller.ex`.
 
 The page we are going to build will say "Hello World, from Phoenix!" when we point our browser to [http://localhost:4000/hello](http://localhost:4000/hello).
 
@@ -46,7 +46,7 @@ defmodule HelloWeb.Router do
     plug :accepts, ["html"]
     plug :fetch_session
     plug :fetch_live_flash
-    plug :put_root_layout, {HelloWeb.LayoutView, :root}
+    plug :put_root_layout, html: {HelloWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
   end
@@ -103,7 +103,7 @@ We'll save a discussion of `use HelloWeb, :controller` for the [Controllers guid
 
 All controller actions take two arguments. The first is `conn`, a struct which holds a ton of data about the request. The second is `params`, which are the request parameters. Here, we are not using `params`, and we avoid compiler warnings by prefixing it with `_`.
 
-The core of this action is `render(conn, :index)`. It tells Phoenix to render the `index` template. The modules responsible for rendering are called views. By default, Phoenix views are named after the controller and format they support, so Phoenix is expecting a `HelloWeb.HelloHTML` to exist and define an `index/1` function for us.
+The core of this action is `render(conn, :index)`. It tells Phoenix to render the `index` template. The modules responsible for rendering are called views. By default, Phoenix views are named after the controller (`HelloController`) and format (`HTML` in this case), so Phoenix is expecting a `HelloWeb.HelloHTML` to exist and define an `index/1` function.
 
 ### A new view
 
@@ -152,6 +152,8 @@ Here we are telling `Phoenix.Component` to embed all `.heex` templates found in 
 Next, we need to add files to the `lib/hello_web/controllers/hello_html` directory.
 
 Note the controller name (`HelloController`), the view name (`HelloHTML`), and the template directory (`hello_html`) all follow the same naming convention and are named after each other. They are also collocated together in the directory tree:
+
+> **Note**: We can rename the `hello_html` directory to whatever we want and put it in a subdirectory of `lib/hello_web/controllers`, as long as we update the `embed_templates` setting accordingly. However, it's best to keep the same naming convention to prevent any confusion.
 
 ```
 lib/hello_web
@@ -221,7 +223,7 @@ At this moment, you may be thinking this can be a lot of steps to simply render 
 
   * view - the view handles the structured data from the controller and converts it to a presentation to be shown to users. Views are often named after the content format they are rendering.
 
-Let's do a quick recap and how the last three components work together by adding another page.
+Let's do a quick recap on how the last three components work together by adding another page.
 
 ## Another new page
 
@@ -265,7 +267,7 @@ def show(conn, %{"messenger" => messenger} = params) do
 end
 ```
 
-It's good to remember that the keys of the `params` map will always be strings, and that the equals sign does not represent assignment, but is instead a [pattern match](https://elixir-lang.org/getting-started/pattern-matching.html) assertion.
+It's good to remember that the keys of the `params` map will always be strings, and that the equals sign does not represent assignment, but is instead a [pattern match](https://hexdocs.pm/elixir/pattern-matching.html) assertion.
 
 ### Another new template
 

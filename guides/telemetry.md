@@ -39,7 +39,7 @@ If you are coming from an older version of Phoenix, install
 the `:telemetry_metrics` and `:telemetry_poller` packages:
 
 ```elixir
-{:telemetry_metrics, "~> 0.6"},
+{:telemetry_metrics, "~> 1.0"},
 {:telemetry_poller, "~> 1.0"}
 ```
 
@@ -418,7 +418,7 @@ the previous example.
 defp live_view_metric_tag_values(metadata) do
   metadata
   |> Map.put(:view, metadata.socket.view)
-  |> Map.put(:connected?, metadata.socket.connected?)
+  |> Map.put(:connected?, Phoenix.LiveView.connected?(metadata.socket))
 end
 ```
 
@@ -435,11 +435,11 @@ convert the `connected?` boolean into human readable text.
 defp live_view_metric_tag_values(metadata) do
   metadata
   |> Map.put(:view, inspect(metadata.socket.view))
-  |> Map.put(:connected?, get_connection_status(metadata.socket))
+  |> Map.put(:connected?, get_connection_status(Phoenix.LiveView.connected?(metadata.socket)))
 end
 
-defp get_connection_status(%{connected?: true}), do: "Connected"
-defp get_connection_status(%{connected?: false}), do: "Disconnected"
+defp get_connection_status(true), do: "Connected"
+defp get_connection_status(false), do: "Disconnected"
 ```
 
 Now the value label will be rendered like `"Phoenix.LiveDashboard.MetricsLive
